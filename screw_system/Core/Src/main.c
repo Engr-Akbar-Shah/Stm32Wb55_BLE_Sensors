@@ -154,7 +154,7 @@ int main(void)
     MX_APPE_Process();
 
     /* USER CODE BEGIN 3 */
-//    APP_DBG_MSG("Hello this is Screw System Project ADV as BOLT\n\r");
+    APP_DBG_MSG("Hello this is Screw System Project ADV as BOLT\n\r");
     HAL_Delay(1000);
   }
   /* USER CODE END 3 */

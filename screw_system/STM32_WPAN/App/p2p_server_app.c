@@ -66,7 +66,7 @@ typedef struct
 #define NOTIF_VERSION_RESPONSE      0x30
 
 /* Firmware version - change these numbers as needed */
-#define FW_VERSION_MAJOR            2
+#define FW_VERSION_MAJOR            1
 #define FW_VERSION_MINOR            0
 #define FW_VERSION_PATCH            0
 

@@ -1,15 +1,33 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 import asyncio
 import threading
 from bleak import BleakClient, BleakScanner
 
 import struct
+import math
+import os
 from datetime import datetime
 
 # Standard ST P2P UUIDs
 LED_WRITE_UUID   = "0000fe41-8e22-4541-9d4c-21edae82ed19"   # Write to control LED
 NOTIFY_UUID      = "0000fe42-8e22-4541-9d4c-21edae82ed19"   # Notifications from device
+
+# --- OTA-specific UUIDs and flash layout ---
+REBOOT_CHAR_UUID      = "0000fe11-8e22-4541-9d4c-21edae82ed19"   # reboot to BLE_Ota
+OTA_SERVICE_UUID      = "0000fe20-cc7a-482a-984a-7f2ed5b3e58f"
+OTA_BASE_ADDR_UUID    = "0000fe22-8e22-4541-9d4c-21edae82ed19"
+OTA_REBOOT_CONF_UUID  = "0000fe23-8e22-4541-9d4c-21edae82ed19"
+OTA_DATA_UUID         = "0000fe24-8e22-4541-9d4c-21edae82ed19"
+
+FLASH_BASE_ADDR       = 0x08000000
+APP_BASE_ADDR         = 0x08007000     # your p2p app base
+FLASH_PAGE_SIZE       = 4096          # 4KB
+OTA_CHUNK_SIZE        = 200           # bytes per BLE write
+
+ACTION_START_USER_APP = 0x02
+ACTION_FILE_FINISHED  = 0x07
+
 
 SENSOR_CMD_PREFIX       = 0x10
 SENSOR_LSM6DSO          = 0x01
@@ -36,7 +54,7 @@ class SimpleBOLTController:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("BOLT LED & Sensor Controller")
+        self.root.title("SCREW SYSTEM STM32WB55")
         self.root.geometry("750x850")
         self.root.resizable(True, True)
 
@@ -54,6 +72,7 @@ class SimpleBOLTController:
         self.lsm6dso_active = False
         self.sttsh22h_active = False
         self.both_sensors_active = False
+        self.ota_bin_path = None
 
         # === UI Elements ===
         # Status label
@@ -89,6 +108,27 @@ class SimpleBOLTController:
             state="disabled"
         )
         self.fetch_version_button.pack(pady=5)
+
+        fw_frame = ttk.LabelFrame(root, text="Firmware Update", padding=10)
+        fw_frame.pack(padx=20, pady=5, fill="x")
+
+        self.select_fw_button = ttk.Button(
+            fw_frame,
+            text="Select Firmware (.bin)",
+            command=self.select_firmware,
+            state="disabled",
+            width=25,
+        )
+        self.select_fw_button.pack(side="left", padx=5)
+
+        self.start_fw_button = ttk.Button(
+            fw_frame,
+            text="Start Update",
+            command=self.start_firmware_update,
+            state="disabled",
+            width=15,
+        )
+        self.start_fw_button.pack(side="left", padx=5)
 
         # Create tabbed interface
         self.notebook = ttk.Notebook(root)
@@ -318,6 +358,10 @@ class SimpleBOLTController:
             self.both_sensors_button.config(state="normal")
             self.fetch_version_button.config(state="normal")
             self.status_label.config(text="Connected to BOLT", foreground="green")
+            self.select_fw_button.config(state="normal")
+            self.start_fw_button.config(
+                state="normal" if self.ota_bin_path else "disabled"
+            )
         self.root.after(0, _update)
 
     def _update_ui_disconnected(self, msg="Disconnected"):
@@ -339,7 +383,207 @@ class SimpleBOLTController:
             self._update_sensor_button_states()
             self.version_label.config(text="Firmware Version: Unknown", foreground="gray")
             
+            self.ota_bin_path = None
+            self.select_fw_button.config(state="disabled", text="Select Firmware (.bin)")
+            self.start_fw_button.config(state="disabled")
+
         self.root.after(0, _update)
+
+    def _compute_sector_info(self, app_addr, size_bytes):
+        offset = app_addr - FLASH_BASE_ADDR
+        first_sector = offset // FLASH_PAGE_SIZE
+        num_sectors = math.ceil(size_bytes / FLASH_PAGE_SIZE)
+        return first_sector, num_sectors
+    
+    async def _do_firmware_update(self):
+        """Async OTA: reboot into BLE_Ota, reconnect, send binary, finish."""
+        try:
+            # 1) Read file
+            try:
+                with open(self.ota_bin_path, "rb") as f:
+                    fw_data = f.read()
+            except Exception as e:
+                self.log_device(f"✗ Could not read firmware file: {e}")
+                return
+
+            first_sec, num_sec = self._compute_sector_info(APP_BASE_ADDR, len(fw_data))
+            self.log_device(
+                f"→ OTA erase plan: first_sector={first_sec}, num_sectors={num_sec}"
+            )
+
+            # 2) Send reboot command over existing user-app connection
+            if not self.client or not self.client.is_connected:
+                self.log_device("✗ Not connected to user app, aborting OTA")
+                return
+
+            reboot_payload = bytes([
+                0x01,                 # boot mode: jump to OTA app
+                first_sec & 0xFF,     # first sector index
+                num_sec & 0xFF,       # number of sectors
+            ])
+
+            try:
+                await self.client.write_gatt_char(
+                    REBOOT_CHAR_UUID, reboot_payload, response=False
+                )
+                self.log_device(
+                    f"→ Reboot to OTA sent: "
+                    f"{' '.join(f'{b:02X}' for b in reboot_payload)}"
+                )
+            except Exception as e:
+                self.log_device(f"✗ Failed to send reboot cmd: {e}")
+                return
+
+            # Disconnect this client; device will reboot into BLE_Ota
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
+            self.client = None
+
+            # 3) Wait and reconnect in OTA mode
+            await asyncio.sleep(3.0)
+            self.log_device("… Waiting for BOLT in OTA mode")
+
+            devices = await BleakScanner.discover(timeout=8.0)
+            target = next((d for d in devices if d.name == "BOLT"), None)
+            if not target:
+                self.log_device("✗ BOLT in OTA mode not found after reboot")
+                return
+
+            self.log_device(f"✓ Found BOLT in OTA mode: {target.address}")
+            ota_client = BleakClient(target.address)
+
+            try:
+                await ota_client.connect()
+                self.log_device("✓ Connected in OTA mode")
+
+                # 4) Send START_USER_APP command
+                offset = APP_BASE_ADDR - FLASH_BASE_ADDR
+                addr_bytes = offset.to_bytes(3, "big")
+                start_payload = bytes([ACTION_START_USER_APP]) + addr_bytes
+
+                await ota_client.write_gatt_char(
+                    OTA_BASE_ADDR_UUID, start_payload, response=False
+                )
+                self.log_device(
+                    f"→ OTA START_USER_APP: {' '.join(f'{b:02X}' for b in start_payload)}"
+                )
+
+                # 5) Stream firmware
+                total = len(fw_data)
+                sent = 0
+                self.log_device(f"→ Sending {total} bytes…")
+
+                for i in range(0, total, OTA_CHUNK_SIZE):
+                    chunk = fw_data[i:i + OTA_CHUNK_SIZE]
+                    await ota_client.write_gatt_char(
+                        OTA_DATA_UUID, chunk, response=False
+                    )
+                    sent += len(chunk)
+                    # light throttling to keep things smooth
+                    await asyncio.sleep(0.001)
+
+                self.log_device(f"✓ Firmware transfer complete ({sent} bytes sent)")
+
+                # 6) Subscribe to reboot notifications BEFORE sending FILE_FINISHED
+                reboot_event = asyncio.Event()
+
+                def reboot_callback(sender, data):
+                    self.log_device(f"← Device rebooting: {data.hex()}")
+                    reboot_event.set()
+
+                try:
+                    await ota_client.start_notify(OTA_REBOOT_CONF_UUID, reboot_callback)
+                    self.log_device("✓ Subscribed to reboot notifications")
+                except Exception as e:
+                    self.log_device(f"⚠ Could not subscribe to reboot notifications: {e}")
+
+                # 7) Tell bootloader we're done (device will auto-reboot after this)
+                finish_payload = bytes([ACTION_FILE_FINISHED]) + addr_bytes
+                await ota_client.write_gatt_char(
+                    OTA_BASE_ADDR_UUID, finish_payload, response=False
+                )
+                self.log_device(
+                    f"→ OTA FILE_FINISHED: {' '.join(f'{b:02X}' for b in finish_payload)}"
+                )
+
+                # 8) Wait for device to send reboot indication
+                self.log_device("… Waiting for device to reboot")
+                try:
+                    await asyncio.wait_for(reboot_event.wait(), timeout=8.0)
+                    self.log_device("✓ Reboot confirmation received")
+                except asyncio.TimeoutError:
+                    self.log_device("⚠ Reboot confirmation timeout (device may still reboot)")
+
+                # Give device time to complete reboot
+                await asyncio.sleep(4.0)
+
+            finally:
+                try:
+                    await ota_client.disconnect()
+                except Exception:
+                    pass
+
+            # 9) Reconnect to updated firmware
+            self.log_device("✓ OTA finished — scanning for new firmware...")
+            await asyncio.sleep(2.0)
+            
+            devices = await BleakScanner.discover(timeout=8.0)
+            target = next((d for d in devices if d.name == "BOLT"), None)
+
+            if target:
+                self.log_device("✓ New firmware detected — reconnecting...")
+                self.client = BleakClient(target.address, disconnected_callback=self._on_disconnect)
+                await self.client.connect()
+                await self.client.start_notify(NOTIFY_UUID, self._notification_handler)
+                self._update_ui_connected()
+                self.log_device("✓ Reconnected to updated firmware")
+                # Fetch the new version
+                self.root.after(500, self.fetch_version)
+            else:
+                self.log_device("⚠ Could not find device after OTA (maybe still rebooting)")
+
+        except Exception as e:
+            self.log_device(f"✗ OTA process failed: {e}")
+            import traceback
+            self.log_device(traceback.format_exc())
+
+        finally:
+            # Re-enable the button on GUI thread
+            self.root.after(0, lambda: self.start_fw_button.config(state="normal"))
+
+    def select_firmware(self):
+        """Let user pick a .bin file for OTA."""
+        path = filedialog.askopenfilename(
+            title="Select firmware binary",
+            filetypes=[("BIN files", "*.bin"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        self.ota_bin_path = path
+        self.log_device(f"✓ Selected firmware: {path}")
+        # Update button label and enable start
+        self.select_fw_button.config(text=os.path.basename(path))
+        if self.is_connected:
+            self.start_fw_button.config(state="normal")
+
+    def start_firmware_update(self):
+        """Trigger firmware update over BLE OTA."""
+        if not self.client or not self.client.is_connected:
+            messagebox.showerror("Error", "Not connected to BOLT")
+            return
+        if not self.ota_bin_path:
+            messagebox.showerror("Error", "Please select a firmware .bin first")
+            return
+
+        # Disable button so user can’t spam it
+        self.start_fw_button.config(state="disabled")
+        self.log_device(f"Starting firmware update: {self.ota_bin_path}")
+
+        asyncio.run_coroutine_threadsafe(self._do_firmware_update(), self.loop)
+
 
     # === LED Control ===
     async def _send_led_command(self, value: int):
