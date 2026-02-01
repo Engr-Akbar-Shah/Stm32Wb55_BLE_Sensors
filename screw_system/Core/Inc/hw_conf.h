@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2019-2021 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -26,6 +26,11 @@
  * Semaphores
  * THIS SHALL NO BE CHANGED AS THESE SEMAPHORES ARE USED AS WELL ON THE CM0+
  *****************************************************************************/
+/**
+* Index of the semaphore used the prevent conflicts after standby sleep.
+* Each CPUs takes this semaphore at standby wakeup until conclicting elements are restored.
+*/
+#define CFG_HW_PWR_STANDBY_SEMID                    10
 /**
 *  The CPU2 may be configured to store the Thread persistent data either in internal NVM storage on CPU2 or in
 *  SRAM2 buffer provided by the user application. This can be configured with the system command SHCI_C2_Config()
@@ -159,98 +164,10 @@
 /******************************************************************************
  * HW UART
  *****************************************************************************/
-#define CFG_HW_LPUART1_ENABLED           1
-#define CFG_HW_LPUART1_DMA_TX_SUPPORTED  1
+#define CFG_HW_LPUART1_ENABLED           0
+#define CFG_HW_LPUART1_DMA_TX_SUPPORTED  0
 
-#define CFG_HW_USART1_ENABLED           1
-#define CFG_HW_USART1_DMA_TX_SUPPORTED  1
-
-/**
- * LPUART1
- */
-#define CFG_HW_LPUART1_PREEMPTPRIORITY         0x0F
-#define CFG_HW_LPUART1_SUBPRIORITY             0
-
-/** < The application shall check the selected source clock is enable */
-#define CFG_HW_LPUART1_SOURCE_CLOCK             RCC_LPUART1CLKSOURCE_SYSCLK
-
-#define CFG_HW_LPUART1_BAUDRATE                115200
-#define CFG_HW_LPUART1_WORDLENGTH              UART_WORDLENGTH_8B
-#define CFG_HW_LPUART1_STOPBITS                UART_STOPBITS_1
-#define CFG_HW_LPUART1_PARITY                  UART_PARITY_NONE
-#define CFG_HW_LPUART1_HWFLOWCTL               UART_HWCONTROL_NONE
-#define CFG_HW_LPUART1_MODE                    UART_MODE_TX_RX
-#define CFG_HW_LPUART1_ADVFEATUREINIT          UART_ADVFEATURE_NO_INIT
-#define CFG_HW_LPUART1_OVERSAMPLING            UART_OVERSAMPLING_8
-
-#define CFG_HW_LPUART1_TX_PORT_CLK_ENABLE      __HAL_RCC_GPIOA_CLK_ENABLE
-#define CFG_HW_LPUART1_TX_PORT                 GPIOA
-#define CFG_HW_LPUART1_TX_PIN                  GPIO_PIN_2
-#define CFG_HW_LPUART1_TX_MODE                 GPIO_MODE_AF_PP
-#define CFG_HW_LPUART1_TX_PULL                 GPIO_NOPULL
-#define CFG_HW_LPUART1_TX_SPEED                GPIO_SPEED_FREQ_VERY_HIGH
-#define CFG_HW_LPUART1_TX_ALTERNATE            GPIO_AF8_LPUART1
-
-#define CFG_HW_LPUART1_RX_PORT_CLK_ENABLE      __HAL_RCC_GPIOA_CLK_ENABLE
-#define CFG_HW_LPUART1_RX_PORT                 GPIOA
-#define CFG_HW_LPUART1_RX_PIN                  GPIO_PIN_3
-#define CFG_HW_LPUART1_RX_MODE                 GPIO_MODE_AF_PP
-#define CFG_HW_LPUART1_RX_PULL                 GPIO_NOPULL
-#define CFG_HW_LPUART1_RX_SPEED                GPIO_SPEED_FREQ_VERY_HIGH
-#define CFG_HW_LPUART1_RX_ALTERNATE            GPIO_AF8_LPUART1
-
-#define CFG_HW_LPUART1_DMA_TX_PREEMPTPRIORITY  0x0F
-#define CFG_HW_LPUART1_DMA_TX_SUBPRIORITY      0
-
-#define CFG_HW_LPUART1_DMAMUX_CLK_ENABLE       __HAL_RCC_DMAMUX1_CLK_ENABLE
-#define CFG_HW_LPUART1_DMA_CLK_ENABLE          __HAL_RCC_DMA1_CLK_ENABLE
-#define CFG_HW_LPUART1_TX_DMA_REQ              DMA_REQUEST_LPUART1_TX
-#define CFG_HW_LPUART1_TX_DMA_CHANNEL          DMA1_Channel4
-#define CFG_HW_LPUART1_TX_DMA_IRQn             DMA1_Channel4_IRQn
-#define CFG_HW_LPUART1_DMA_TX_IRQHandler       DMA1_Channel4_IRQHandler
-
-/**
- * UART1
- */
-#define CFG_HW_USART1_PREEMPTPRIORITY         0x0F
-#define CFG_HW_USART1_SUBPRIORITY             0
-
-/** < The application shall check the selected source clock is enable */
-#define CFG_HW_USART1_SOURCE_CLOCK              RCC_USART1CLKSOURCE_SYSCLK
-
-#define CFG_HW_USART1_BAUDRATE                115200
-#define CFG_HW_USART1_WORDLENGTH              UART_WORDLENGTH_8B
-#define CFG_HW_USART1_STOPBITS                UART_STOPBITS_1
-#define CFG_HW_USART1_PARITY                  UART_PARITY_NONE
-#define CFG_HW_USART1_HWFLOWCTL               UART_HWCONTROL_NONE
-#define CFG_HW_USART1_MODE                    UART_MODE_TX_RX
-#define CFG_HW_USART1_ADVFEATUREINIT          UART_ADVFEATURE_NO_INIT
-#define CFG_HW_USART1_OVERSAMPLING            UART_OVERSAMPLING_8
-
-#define CFG_HW_USART1_TX_PORT_CLK_ENABLE      __HAL_RCC_GPIOB_CLK_ENABLE
-#define CFG_HW_USART1_TX_PORT                 GPIOB
-#define CFG_HW_USART1_TX_PIN                  GPIO_PIN_6
-#define CFG_HW_USART1_TX_MODE                 GPIO_MODE_AF_PP
-#define CFG_HW_USART1_TX_PULL                 GPIO_NOPULL
-#define CFG_HW_USART1_TX_SPEED                GPIO_SPEED_FREQ_VERY_HIGH
-#define CFG_HW_USART1_TX_ALTERNATE            GPIO_AF7_USART1
-
-#define CFG_HW_USART1_RX_PORT_CLK_ENABLE      __HAL_RCC_GPIOB_CLK_ENABLE
-#define CFG_HW_USART1_RX_PORT                 GPIOB
-#define CFG_HW_USART1_RX_PIN                  GPIO_PIN_7
-#define CFG_HW_USART1_RX_MODE                 GPIO_MODE_AF_PP
-#define CFG_HW_USART1_RX_PULL                 GPIO_NOPULL
-#define CFG_HW_USART1_RX_SPEED                GPIO_SPEED_FREQ_VERY_HIGH
-#define CFG_HW_USART1_RX_ALTERNATE            GPIO_AF7_USART1
-
-#define CFG_HW_USART1_DMA_TX_PREEMPTPRIORITY  0x0F
-#define CFG_HW_USART1_DMA_TX_SUBPRIORITY      0
-
-#define CFG_HW_USART1_DMAMUX_CLK_ENABLE       __HAL_RCC_DMAMUX1_CLK_ENABLE
-#define CFG_HW_USART1_DMA_CLK_ENABLE          __HAL_RCC_DMA2_CLK_ENABLE
-#define CFG_HW_USART1_TX_DMA_REQ			  DMA_REQUEST_USART1_TX
-#define CFG_HW_USART1_TX_DMA_CHANNEL          DMA2_Channel4
-#define CFG_HW_USART1_TX_DMA_IRQn             DMA2_Channel4_IRQn
-#define CFG_HW_USART1_DMA_TX_IRQHandler       DMA2_Channel4_IRQHandler
+#define CFG_HW_USART1_ENABLED           0
+#define CFG_HW_USART1_DMA_TX_SUPPORTED  0
 
 #endif /*HW_CONF_H */

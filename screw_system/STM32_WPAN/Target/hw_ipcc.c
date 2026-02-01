@@ -1,13 +1,13 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file    hw_ipcc.c
+  * @file    Target/hw_ipcc.c
   * @author  MCD Application Team
   * @brief   Hardware IPCC source file for STM32WPAN Middleware.
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2020-2021 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -29,6 +29,11 @@
 #define HW_IPCC_RX_PENDING( channel )  (LL_C2_IPCC_IsActiveFlag_CHx( IPCC, channel )) && (((~(IPCC->C1MR)) & (channel << 0U)))
 
 /* Private macros ------------------------------------------------------------*/
+#if ( (STM32WB15xx != 0) && (CFG_LPM_STANDBY_SUPPORTED != 0) )
+#define HW_IPCC_SET_FLAG_CHX(x) HW_IPCC_SetFlagCHx(x)
+#else
+#define HW_IPCC_SET_FLAG_CHX(x) LL_C1_IPCC_SetFlag_CHx(IPCC, x)
+#endif
 /* Private typedef -----------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
 static void (*FreeBufCb)( void );
@@ -68,6 +73,10 @@ static void HW_IPCC_ZIGBEE_StackNotifEvtHandler( void );
 static void HW_IPCC_ZIGBEE_StackM0RequestHandler( void );
 #endif
 
+#if ( (STM32WB15xx != 0) && (CFG_LPM_STANDBY_SUPPORTED != 0) )
+static void IPCC_Wakeup_CPU2(void);
+static void HW_IPCC_SetFlagCHx(uint32_t Channel);
+#endif
 /* Public function definition -----------------------------------------------*/
 
 /******************************************************************************
@@ -222,6 +231,30 @@ void HW_IPCC_Init( void )
   return;
 }
 
+#if(CFG_LPM_STANDBY_SUPPORTED != 0)
+static void IPCC_Wakeup_CPU2(void)
+{
+  /**
+   * When the device is out of standby, it is required to use the EXTI mechanism to wakeup CPU2
+   */
+  LL_EXTI_EnableRisingTrig_32_63( LL_EXTI_LINE_41 );
+  /* It is required to have at least a system clock cycle before a SEV after LL_EXTI_EnableRisingTrig_32_63() */
+  LL_C2_EXTI_EnableEvent_32_63( LL_EXTI_LINE_41 );
+
+  __SEV( );       /* Set the internal event flag and send an event to the CPU2 */
+  __WFE( );       /* Clear the internal event flag */
+
+  return;
+}
+
+static void HW_IPCC_SetFlagCHx(uint32_t Channel)
+{
+  IPCC_Wakeup_CPU2();
+  LL_C1_IPCC_SetFlag_CHx(IPCC, Channel);
+
+  return;
+}
+#endif
 /******************************************************************************
  * BLE
  ******************************************************************************/
@@ -236,7 +269,7 @@ void HW_IPCC_BLE_Init( void )
 
 void HW_IPCC_BLE_SendCmd( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_BLE_CMD_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_BLE_CMD_CHANNEL );
 
   return;
 }
@@ -252,7 +285,7 @@ static void HW_IPCC_BLE_EvtHandler( void )
 
 void HW_IPCC_BLE_SendAclData( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_HCI_ACL_DATA_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_HCI_ACL_DATA_CHANNEL );
   UTILS_ENTER_CRITICAL_SECTION();
   LL_C1_IPCC_EnableTransmitChannel( IPCC, HW_IPCC_HCI_ACL_DATA_CHANNEL );
   UTILS_EXIT_CRITICAL_SECTION();
@@ -288,7 +321,7 @@ void HW_IPCC_SYS_Init( void )
 
 void HW_IPCC_SYS_SendCmd( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_SYSTEM_CMD_RSP_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_SYSTEM_CMD_RSP_CHANNEL );
   UTILS_ENTER_CRITICAL_SECTION();
   LL_C1_IPCC_EnableTransmitChannel( IPCC, HW_IPCC_SYSTEM_CMD_RSP_CHANNEL );
   UTILS_EXIT_CRITICAL_SECTION();
@@ -334,7 +367,7 @@ void HW_IPCC_MAC_802_15_4_Init( void )
 
 void HW_IPCC_MAC_802_15_4_SendCmd( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_MAC_802_15_4_CMD_RSP_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_MAC_802_15_4_CMD_RSP_CHANNEL );
   UTILS_ENTER_CRITICAL_SECTION();
   LL_C1_IPCC_EnableTransmitChannel( IPCC, HW_IPCC_MAC_802_15_4_CMD_RSP_CHANNEL );
   UTILS_EXIT_CRITICAL_SECTION();
@@ -393,7 +426,7 @@ void HW_IPCC_THREAD_Init( void )
 
 void HW_IPCC_OT_SendCmd( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_THREAD_OT_CMD_RSP_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_THREAD_OT_CMD_RSP_CHANNEL );
   UTILS_ENTER_CRITICAL_SECTION();
   LL_C1_IPCC_EnableTransmitChannel( IPCC, HW_IPCC_THREAD_OT_CMD_RSP_CHANNEL );
   UTILS_EXIT_CRITICAL_SECTION();
@@ -403,7 +436,7 @@ void HW_IPCC_OT_SendCmd( void )
 
 void HW_IPCC_CLI_SendCmd( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_THREAD_CLI_CMD_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_THREAD_CLI_CMD_CHANNEL );
 
   return;
 }
@@ -622,7 +655,7 @@ void HW_IPCC_ZIGBEE_Init( void )
 
 void HW_IPCC_ZIGBEE_SendM4RequestToM0( void )
 {
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_ZIGBEE_CMD_APPLI_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_ZIGBEE_CMD_APPLI_CHANNEL );
   UTILS_ENTER_CRITICAL_SECTION();
   LL_C1_IPCC_EnableTransmitChannel( IPCC, HW_IPCC_ZIGBEE_CMD_APPLI_CHANNEL );
   UTILS_EXIT_CRITICAL_SECTION();
@@ -704,7 +737,7 @@ void HW_IPCC_MM_SendFreeBuf( void (*cb)( void ) )
   {
     cb();
 
-    LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_MM_RELEASE_BUFFER_CHANNEL );
+    HW_IPCC_SET_FLAG_CHX( HW_IPCC_MM_RELEASE_BUFFER_CHANNEL );
   }
 
   return;
@@ -718,7 +751,7 @@ static void HW_IPCC_MM_FreeBufHandler( void )
 
   FreeBufCb();
 
-  LL_C1_IPCC_SetFlag_CHx( IPCC, HW_IPCC_MM_RELEASE_BUFFER_CHANNEL );
+  HW_IPCC_SET_FLAG_CHX( HW_IPCC_MM_RELEASE_BUFFER_CHANNEL );
 
   return;
 }

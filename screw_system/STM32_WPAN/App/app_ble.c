@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
- ******************************************************************************
- * @file    app_ble.c
- * @author  MCD Application Team
- * @brief   BLE Application
- ******************************************************************************
- * @attention
- *
- * Copyright (c) 2019-2021 STMicroelectronics.
- * All rights reserved.
- *
- * This software is licensed under terms that can be found in the LICENSE file
- * in the root directory of this software component.
- * If no LICENSE file comes with this software, it is provided AS-IS.
- *
- ******************************************************************************
- */
+  ******************************************************************************
+  * @file    App/app_ble.c
+  * @author  MCD Application Team
+  * @brief   BLE Application
+  *****************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -37,7 +37,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#define BLE_DEFAULT_PIN 123456
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,14 +64,6 @@ typedef struct _tSecurityParams
   uint8_t bonding_mode;
 
   /**
-   * this variable indicates whether to use a fixed pin
-   * during the pairing process or a passkey has to be
-   * requested to the application during the pairing process
-   * 0 implies use fixed pin and 1 implies request for passkey
-   */
-  uint8_t Use_Fixed_Pin;
-
-  /**
    * minimum encryption key size requirement
    */
   uint8_t encryptionKeySizeMin;
@@ -80,12 +72,6 @@ typedef struct _tSecurityParams
    * maximum encryption key size requirement
    */
   uint8_t encryptionKeySizeMax;
-
-  /**
-   * fixed pin to be used in the pairing process if
-   * Use_Fixed_Pin is set to 1
-   */
-  uint32_t Fixed_Pin;
 
   /**
    * this flag indicates whether the host has to initiate
@@ -177,9 +163,10 @@ typedef struct
 #define INITIAL_ADV_TIMEOUT            (60*1000*1000/CFG_TS_TICK_VAL) /**< 60s */
 
 #define BD_ADDR_SIZE_LOCAL    6
+#define BLE_DEFAULT_PIN                     (111111)
 
 /* USER CODE BEGIN PD */
-#define LED_ON_TIMEOUT (0.005 * 1000 * 1000 / CFG_TS_TICK_VAL) /**< 5ms */
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -431,10 +418,9 @@ void APP_BLE_Init(void)
    */
   Ble_Tl_Init();
 
-  /**
-   * Do not allow standby in the application
-   */
-  UTIL_LPM_SetOffMode(1 << CFG_LPM_APP_BLE, UTIL_LPM_DISABLE);
+#if (CFG_LPM_STANDBY_SUPPORTED == 0)
+  UTIL_LPM_SetOffMode(1U << CFG_LPM_APP_BLE, UTIL_LPM_DISABLE);
+#endif /* CFG_LPM_STANDBY_SUPPORTED == 0 */
 
   /**
    * Register the hci transport layer to handle BLE User Asynchronous Events
@@ -728,92 +714,7 @@ SVCCTL_UserEvtFlowStatus_t SVCCTL_App_Notification(void *p_Pckt)
       switch (p_blecore_evt->ecode)
       {
         /* USER CODE BEGIN ecode */
-      aci_gap_pairing_complete_event_rp0 *pairing_complete;
 
-    case ACI_GAP_LIMITED_DISCOVERABLE_VSEVT_CODE:
-      APP_DBG_MSG(">>== ACI_GAP_LIMITED_DISCOVERABLE_VSEVT_CODE \n");
-      break; /* ACI_GAP_LIMITED_DISCOVERABLE_VSEVT_CODE */
-
-    case ACI_GAP_PASS_KEY_REQ_VSEVT_CODE:
-    {
-      uint32_t pin;
-      APP_DBG_MSG(">>== ACI_GAP_PASS_KEY_REQ_VSEVT_CODE \n");
-
-      pin = BLE_DEFAULT_PIN;
-      /* USER CODE BEGIN ACI_GAP_PASS_KEY_REQ_VSEVT_CODE_0 */
-
-      /* USER CODE END ACI_GAP_PASS_KEY_REQ_VSEVT_CODE_0 */
-
-      ret = aci_gap_pass_key_resp(BleApplicationContext.BleApplicationContext_legacy.connectionHandle, pin);
-      if (ret != BLE_STATUS_SUCCESS)
-      {
-        APP_DBG_MSG("==>> aci_gap_pass_key_resp : Fail, reason: 0x%x\n", ret);
-      }
-      else
-      {
-        APP_DBG_MSG("==>> aci_gap_pass_key_resp : Success \n");
-      }
-      break; /* ACI_GAP_PASS_KEY_REQ_VSEVT_CODE */
-    }
-
-    case ACI_GAP_AUTHORIZATION_REQ_VSEVT_CODE:
-      APP_DBG_MSG(">>== ACI_GAP_AUTHORIZATION_REQ_VSEVT_CODE\n");
-      break; /* ACI_GAP_AUTHORIZATION_REQ_VSEVT_CODE */
-
-    case ACI_GAP_BOND_LOST_VSEVT_CODE:
-      APP_DBG_MSG("==>> ACI_GAP_BOND_LOST_VSEVT_CODE \n");
-      ret = aci_gap_allow_rebond(BleApplicationContext.BleApplicationContext_legacy.connectionHandle);
-      if (ret != BLE_STATUS_SUCCESS)
-      {
-        APP_DBG_MSG("==>> aci_gap_allow_rebond : Fail, reason: 0x%x\n", ret);
-      }
-      else
-      {
-        APP_DBG_MSG("==>> aci_gap_allow_rebond : Success \n");
-      }
-      break; /* ACI_GAP_BOND_LOST_VSEVT_CODE */
-
-    case ACI_GAP_ADDR_NOT_RESOLVED_VSEVT_CODE:
-      APP_DBG_MSG(">>== ACI_GAP_ADDR_NOT_RESOLVED_VSEVT_CODE \n");
-      break; /* ACI_GAP_ADDR_NOT_RESOLVED_VSEVT_CODE */
-
-    case (ACI_GAP_KEYPRESS_NOTIFICATION_VSEVT_CODE):
-      APP_DBG_MSG(">>== ACI_GAP_KEYPRESS_NOTIFICATION_VSEVT_CODE\n");
-      break; /* ACI_GAP_KEYPRESS_NOTIFICATION_VSEVT_CODE */
-
-    case (ACI_GAP_NUMERIC_COMPARISON_VALUE_VSEVT_CODE):
-      APP_DBG_MSG(">>== ACI_GAP_NUMERIC_COMPARISON_VALUE_VSEVT_CODE\n");
-      APP_DBG_MSG("     - numeric_value = %ld\n",
-                  ((aci_gap_numeric_comparison_value_event_rp0 *)(p_blecore_evt->data))->Numeric_Value);
-      APP_DBG_MSG("     - Hex_value = %lx\n",
-                  ((aci_gap_numeric_comparison_value_event_rp0 *)(p_blecore_evt->data))->Numeric_Value);
-      ret = aci_gap_numeric_comparison_value_confirm_yesno(BleApplicationContext.BleApplicationContext_legacy.connectionHandle, YES); /* CONFIRM_YES = 1 */
-      if (ret != BLE_STATUS_SUCCESS)
-      {
-        APP_DBG_MSG("==>> aci_gap_numeric_comparison_value_confirm_yesno-->YES : Fail, reason: 0x%x\n", ret);
-      }
-      else
-      {
-        APP_DBG_MSG("==>> aci_gap_numeric_comparison_value_confirm_yesno-->YES : Success \n");
-      }
-      break;
-
-    case (ACI_GAP_PAIRING_COMPLETE_VSEVT_CODE):
-    {
-      pairing_complete = (aci_gap_pairing_complete_event_rp0 *)p_blecore_evt->data;
-
-      APP_DBG_MSG(">>== ACI_GAP_PAIRING_COMPLETE_VSEVT_CODE\n");
-      if (pairing_complete->Status == 0)
-      {
-        APP_DBG_MSG("     - Pairing Success\n");
-      }
-      else
-      {
-        APP_DBG_MSG("     - Pairing KO \n     - Status: 0x%x\n     - Reason: 0x%x\n", pairing_complete->Status, pairing_complete->Reason);
-      }
-      APP_DBG_MSG("\n");
-    }
-    break;
         /* USER CODE END ecode */
 
         /**
@@ -838,8 +739,7 @@ SVCCTL_UserEvtFlowStatus_t SVCCTL_App_Notification(void *p_Pckt)
 #if (RADIO_ACTIVITY_EVENT != 0)
         case ACI_HAL_END_OF_RADIO_ACTIVITY_VSEVT_CODE:
           /* USER CODE BEGIN RADIO_ACTIVITY_EVENT*/
-      BSP_LED_On(LED_GREEN);
-      HW_TS_Start(BleApplicationContext.SwitchOffGPIO_timer_Id, (uint32_t)LED_ON_TIMEOUT);
+
           /* USER CODE END RADIO_ACTIVITY_EVENT*/
           break; /* ACI_HAL_END_OF_RADIO_ACTIVITY_VSEVT_CODE */
 #endif /* RADIO_ACTIVITY_EVENT != 0 */
@@ -877,23 +777,6 @@ APP_BLE_ConnStatus_t APP_BLE_Get_Server_Connection_Status(void)
 }
 
 /* USER CODE BEGIN FD*/
-void APP_BLE_Key_Button1_Action(void)
-{
-  P2PS_APP_SW1_Button_Action();
-}
-
-void APP_BLE_Key_Button2_Action(void)
-{
-#if (L2CAP_REQUEST_NEW_CONN_PARAM != 0)
-  UTIL_SEQ_SetTask(1 << CFG_TASK_CONN_UPDATE_REG_ID, CFG_SCH_PRIO_0);
-#endif
-
-  return;
-}
-
-void APP_BLE_Key_Button3_Action(void)
-{
-}
 
 /* USER CODE END FD*/
 
@@ -1143,8 +1026,6 @@ static void Ble_Hci_Gap_Gatt_Init(void)
   BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.mitm_mode = CFG_MITM_PROTECTION;
   BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.encryptionKeySizeMin = CFG_ENCRYPTION_KEY_SIZE_MIN;
   BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.encryptionKeySizeMax = CFG_ENCRYPTION_KEY_SIZE_MAX;
-  BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.Use_Fixed_Pin = CFG_USED_FIXED_PIN;
-  BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.Fixed_Pin = CFG_FIXED_PIN;
   BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.bonding_mode = CFG_BONDING_MODE;
   /* USER CODE BEGIN Ble_Hci_Gap_Gatt_Init_1*/
 
@@ -1156,8 +1037,8 @@ static void Ble_Hci_Gap_Gatt_Init(void)
                                                CFG_KEYPRESS_NOTIFICATION_SUPPORT,
                                                BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.encryptionKeySizeMin,
                                                BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.encryptionKeySizeMax,
-                                               BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.Use_Fixed_Pin,
-                                               BleApplicationContext.BleApplicationContext_legacy.bleSecurityParam.Fixed_Pin,
+                                               USE_FIXED_PIN_FOR_PAIRING_FORBIDDEN, /* deprecated feature */
+                                               0,                                   /* deprecated feature */
                                                CFG_IDENTITY_ADDRESS);
   if (ret != BLE_STATUS_SUCCESS)
   {
@@ -1336,26 +1217,26 @@ const uint8_t* BleGetBdAddress(void)
 static void Adv_Cancel(void)
 {
   /* USER CODE BEGIN Adv_Cancel_1 */
-  BSP_LED_Off(LED_GREEN);
+
   /* USER CODE END Adv_Cancel_1 */
-
-  if (BleApplicationContext.Device_Connection_Status != APP_BLE_CONNECTED_SERVER)
-  {
-    tBleStatus ret = BLE_STATUS_INVALID_PARAMS;
-
-    ret = aci_gap_set_non_discoverable();
-
-    BleApplicationContext.Device_Connection_Status = APP_BLE_IDLE;
-    if (ret != BLE_STATUS_SUCCESS)
-    {
-      APP_DBG_MSG("** STOP ADVERTISING **  Failed \r\n\r");
-    }
-    else
-    {
-      APP_DBG_MSG("  \r\n\r");
-      APP_DBG_MSG("** STOP ADVERTISING **  \r\n\r");
-    }
-  }
+	//If you dont want the adv to stop
+//  if (BleApplicationContext.Device_Connection_Status != APP_BLE_CONNECTED_SERVER)
+//  {
+//    tBleStatus ret = BLE_STATUS_INVALID_PARAMS;
+//
+//    ret = aci_gap_set_non_discoverable();
+//
+//    BleApplicationContext.Device_Connection_Status = APP_BLE_IDLE;
+//    if (ret != BLE_STATUS_SUCCESS)
+//    {
+//      APP_DBG_MSG("** STOP ADVERTISING **  Failed \r\n\r");
+//    }
+//    else
+//    {
+//      APP_DBG_MSG("  \r\n\r");
+//      APP_DBG_MSG("** STOP ADVERTISING **  \r\n\r");
+//    }
+//  }
 
   /* USER CODE BEGIN Adv_Cancel_2 */
 
@@ -1382,7 +1263,7 @@ static void Adv_Cancel_Req(void)
 static void Switch_OFF_GPIO()
 {
   /* USER CODE BEGIN Switch_OFF_GPIO */
-  BSP_LED_Off(LED_GREEN);
+
   /* USER CODE END Switch_OFF_GPIO */
 }
 

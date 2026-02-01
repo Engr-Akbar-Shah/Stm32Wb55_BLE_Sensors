@@ -1,13 +1,13 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file    p2p_server_app.h
+  * @file    App/p2p_server_app.h
   * @author  MCD Application Team
-  * @brief   PHeader for p2p_server_app.c module
+  * @brief   Header for p2p_server_app.c module
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2020-2021 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -30,6 +30,17 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
+extern int16_t accel_x;
+extern int16_t accel_y;
+extern int16_t accel_z;
+extern int16_t gyro_x;
+extern int16_t gyro_y;
+extern int16_t gyro_z;
+
+extern int16_t temperature;     // 25.00 °C in 0.01 °C units
+
+extern uint16_t strain_raw;     // middle value, e.g. no strain
 
 /* USER CODE END Includes */
 
@@ -68,7 +79,6 @@ typedef struct
   void P2PS_APP_Init( void );
   void P2PS_APP_Notification( P2PS_APP_ConnHandle_Not_evt_t *pNotification );
 /* USER CODE BEGIN EF */
-  void P2PS_APP_SW1_Button_Action( void );
 
 /* USER CODE END EF */
 

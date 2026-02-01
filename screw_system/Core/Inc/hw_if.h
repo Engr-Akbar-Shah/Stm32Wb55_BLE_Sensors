@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2019-2021 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -44,7 +44,7 @@ extern "C" {
 #include "stm32wbxx_usb_dongle.h"
 #endif
 #ifdef  USE_STM32WBXX_NUCLEO
-#include "stm32wbxx_nucleo.h"
+#include "nucleo_wb15cc.h"
 #endif
 #ifdef  USE_X_NUCLEO_EPD
 #include "x_nucleo_epd.h"

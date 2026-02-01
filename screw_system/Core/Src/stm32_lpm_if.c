@@ -1,13 +1,13 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
+  ***************************************************************************************
   * @file    stm32_lpm_if.c
   * @author  MCD Application Team
   * @brief   Low layer function to enter/exit low power modes (stop, sleep).
-  ******************************************************************************
+  ***************************************************************************************
   * @attention
   *
-  * Copyright (c) 2019-2021 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -22,6 +22,8 @@
 #include "stm32_lpm_if.h"
 #include "stm32_lpm.h"
 #include "app_conf.h"
+#include "main.h"
+#include "standby.h"
 /* USER CODE BEGIN include */
 
 /* USER CODE END include */
@@ -39,10 +41,19 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
   PWR_ExitOffMode,
 };
 
+extern RTC_HandleTypeDef hrtc;
+
+void CPUcontextSave(void); /* this function is implemented in startup assembly file */
+void SystemClock_Config(void);
+void PeriphCommonClock_Config(void);
+
 /* Private function prototypes -----------------------------------------------*/
 static void Switch_On_HSI(void);
 static void EnterLowPower(void);
 static void ExitLowPower(void);
+#if (CFG_LPM_STANDBY_SUPPORTED != 0)
+static void ExitLowPower_standby(void);
+#endif
 /* USER CODE BEGIN Private_Function_Prototypes */
 
 /* USER CODE END Private_Function_Prototypes */
@@ -79,6 +90,7 @@ void PWR_EnterOffMode(void)
    * at this time, the device may enter either OffMode or StopMode.
    */
   HAL_SuspendTick();
+  __HAL_RCC_CLEAR_RESET_FLAGS();
 
   EnterLowPower();
 
@@ -105,7 +117,15 @@ void PWR_EnterOffMode(void)
   __force_stores();
 #endif
 
-  __WFI();
+#if (CFG_LPM_STANDBY_SUPPORTED != 0)
+  LL_EXTI_EnableRisingTrig_32_63(LL_EXTI_LINE_40);
+  LL_EXTI_EnableEvent_32_63(LL_EXTI_LINE_40);
+
+  STBY_AppHwSave();
+  STBY_SysHwSave();
+
+  CPUcontextSave();/* this function will call WFI instruction */
+#endif
 
 /* USER CODE BEGIN PWR_EnterOffMode_2 */
 
@@ -123,7 +143,18 @@ void PWR_ExitOffMode(void)
 /* USER CODE BEGIN PWR_ExitOffMode_1 */
 
 /* USER CODE END PWR_ExitOffMode_1 */
-  HAL_ResumeTick();
+#if (CFG_LPM_STANDBY_SUPPORTED != 0)
+  if(STBY_BootStatus != 0)
+  {
+    STBY_SysHwRestore();
+    ExitLowPower_standby();
+    STBY_AppHwRestore();
+  }
+  else
+  {
+    ExitLowPower();
+  }
+#endif
 /* USER CODE BEGIN PWR_ExitOffMode_2 */
 
 /* USER CODE END PWR_ExitOffMode_2 */
@@ -159,7 +190,7 @@ void PWR_EnterStopMode(void)
   /************************************************************************************
    * ENTER STOP MODE
    ***********************************************************************************/
-  LL_PWR_SetPowerMode(LL_PWR_MODE_STOP2);
+  LL_PWR_SetPowerMode(LL_PWR_MODE_STOP1);
 
   LL_LPM_EnableDeepSleep(); /**< Set SLEEPDEEP bit of Cortex System Control Register */
 
@@ -252,6 +283,25 @@ void PWR_ExitSleepMode(void)
   return;
 }
 
+/**
+* @brief Weak CPUcontextSave function definition to implement in startup file.
+* @param none
+* @retval none
+*/
+__WEAK void CPUcontextSave(void)
+{
+#if (CFG_LPM_STANDBY_SUPPORTED != 0)
+  /*
+   * If you are here, you have to update your startup_stm32wb15xx_cm4.s file to
+   * implement CPUcontextSave function like done in latest STM32CubeWB package
+   * into STM32WB15 BLE applications.
+   */
+  Error_Handler();
+#endif
+
+  return;
+}
+
 /*************************************************************
  *
  * LOCAL FUNCTIONS
@@ -309,12 +359,7 @@ static void ExitLowPower(void)
   {
 /* Restore the clock configuration of the application in this user section */
 /* USER CODE BEGIN ExitLowPower_1 */
-    LL_RCC_HSE_Enable( );
-    __HAL_FLASH_SET_LATENCY(FLASH_LATENCY_1);
-    while(__HAL_FLASH_GET_LATENCY() != FLASH_LATENCY_1);
-    while(!LL_RCC_HSE_IsReady( ));
-    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSE);
-    while (LL_RCC_GetSysClkSource( ) != LL_RCC_SYS_CLKSOURCE_STATUS_HSE);
+
 /* USER CODE END ExitLowPower_1 */
   }
   else
@@ -324,12 +369,40 @@ static void ExitLowPower(void)
 
 /* USER CODE END ExitLowPower_2 */
   }
+#if (CFG_LPM_STANDBY_SUPPORTED != 0)
+
+  __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+#endif
 
   /* Release RCC semaphore */
   LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
 
   return;
 }
+
+#if (CFG_LPM_STANDBY_SUPPORTED != 0)
+/**
+  * @brief Restore the system to exit standby mode
+  * @param none
+  * @retval none
+  */
+static void ExitLowPower_standby(void)
+{
+/* Release ENTRY_STOP_MODE semaphore */
+  LL_HSEM_ReleaseLock(HSEM, CFG_HW_ENTRY_STOP_MODE_SEMID, 0);
+
+  while(LL_HSEM_1StepLock(HSEM, CFG_HW_RCC_SEMID));
+/* USER CODE BEGIN ExitLowPower_standby */
+
+/* USER CODE END ExitLowPower_standby */
+  __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+
+  /* Release RCC semaphore */
+  LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+
+  return;
+}
+#endif
 
 /**
   * @brief Switch the system clock on HSI
