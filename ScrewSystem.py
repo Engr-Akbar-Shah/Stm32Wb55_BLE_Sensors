@@ -23,7 +23,7 @@ OTA_DATA_UUID         = "0000fe24-8e22-4541-9d4c-21edae82ed19"
 
 FLASH_BASE_ADDR       = 0x08000000
 APP_BASE_ADDR         = 0x08007000     # your p2p app base
-FLASH_PAGE_SIZE       = 4096          # 2KB
+FLASH_PAGE_SIZE       = 2048          # 2KB
 OTA_CHUNK_SIZE        = 100           # bytes per BLE write
 
 ACTION_START_USER_APP = 0x02
@@ -44,6 +44,8 @@ NOTIF_SENSOR_DATA       = 0x20
 NOTIF_SENSOR_STATUS     = 0x21
 VERSION_REQUEST_PREFIX  = 0x30
 NOTIF_VERSION_RESPONSE  = 0x30
+RSSI_REQUEST_PREFIX     = 0x40  
+NOTIF_RSSI_RESPONSE     = 0x40  
 
 # Sensor Command Protocol
 # Format: [Device_Selection, Sensor_ID, Action]
@@ -64,8 +66,9 @@ class SimpleBOLTController:
     def __init__(self, root):
         self.root = root
         self.root.title("SCREW SYSTEM STM32WB15")
-        self.root.geometry("1080x1080")
+        self.root.geometry("1080x1500")
         self.root.resizable(True, True)
+
 
         self.client = None
         self.is_connected = False
@@ -80,7 +83,6 @@ class SimpleBOLTController:
         self.sttsh22h_count = 0
 
         self.last_ping_start = None  # For latency measurement
-        self.rssi_task_running = False  # To control periodic RSSI updates
         
         # Sensor states
         self.lsm6dso_active = False
@@ -96,7 +98,7 @@ class SimpleBOLTController:
             font=("Arial", 12, "bold"),
             foreground="red"
         )
-        self.status_label.pack(pady=10)
+        self.status_label.pack(pady=5)
 
         self.version_label = ttk.Label(
             root,
@@ -104,48 +106,65 @@ class SimpleBOLTController:
             font=("Arial", 13, "bold"),
             foreground="gray"
         )
-        self.version_label.pack(pady=5)
+        self.version_label.pack(pady=2)
+
+        info_frame = ttk.Frame(root)
+        info_frame.pack(pady=5)
 
         self.rssi_label = ttk.Label(
-            root,
+            info_frame,
             text="RSSI: N/A dBm",
             font=("Arial", 11, "bold"),
             foreground="gray"
         )
-        self.rssi_label.pack(pady=5)
+        self.rssi_label.grid(row=0, column=0, padx=15)
 
         self.latency_label = ttk.Label(
-            root,
+            info_frame,
             text="Latency: N/A ms",
             font=("Arial", 11, "bold"),
             foreground="gray"
         )
-        self.latency_label.pack(pady=5)
+        self.latency_label.grid(row=0, column=1, padx=15)
 
         self.mtu_label = ttk.Label(
-            root,
+            info_frame,
             text="MTU: N/A bytes",
             font=("Arial", 11, "bold"),  
             foreground="gray"
         )
-        self.mtu_label.pack(pady=5)
+        self.mtu_label.grid(row=0, column=2, padx=15)
 
         # Connection button
+        control_frame = ttk.Frame(root)
+        control_frame.pack(pady=(8, 12))   # some breathing room above/below
+
         self.connect_button = ttk.Button(
-            root, 
-            text="Connect to BOLT", 
+            control_frame,
+            text="Connect to BOLT",
             command=self.toggle_connection,
-            width=25
+            width=24,
+            style="Accent.TButton"   # if you have a theme with Accent style
         )
-        self.connect_button.pack(pady=5)
+        self.connect_button.pack(side="left", padx=8)
+
         self.fetch_version_button = ttk.Button(
-            root,
+            control_frame,
             text="Fetch Version",
             command=self.fetch_version,
-            width=25,
+            width=18,
             state="disabled"
         )
-        self.fetch_version_button.pack(pady=5)
+        self.fetch_version_button.pack(side="left", padx=8)
+
+        self.fetch_rssi_button = ttk.Button(
+            control_frame,
+            text="Fetch RSSI",
+            command=self.fetch_rssi,
+            width=18,
+            state="disabled"
+        )
+        self.fetch_rssi_button.pack(side="left", padx=8)
 
         fw_frame = ttk.LabelFrame(root, text="Firmware Update", padding=10)
         fw_frame.pack(padx=20, pady=5, fill="x")
@@ -171,26 +190,43 @@ class SimpleBOLTController:
 
         # Create tabbed interface
         self.notebook = ttk.Notebook(root)
-        self.notebook.pack(padx=20, pady=10, fill="both", expand=True)
+        # self.notebook.pack(padx=20, pady=10, fill="both", expand=True)
+        # self.notebook.pack(padx=20, pady=5, fill="x", expand=False)
+
+        self.paned_window = tk.PanedWindow(
+            root, 
+            orient=tk.VERTICAL,      # Stack vertically
+            sashwidth=8,             # Width of the draggable divider
+            sashrelief=tk.RAISED,    # Makes it look draggable
+            bg="#cccccc"             # Divider color
+        )
+        self.paned_window.pack(padx=10, pady=5, fill="both", expand=True)
+
+        self.notebook = ttk.Notebook(self.paned_window)
+        self.paned_window.add(self.notebook, minsize=150)
 
         # === LED Control Tab ===
-        # led_tab = ttk.Frame(self.notebook)
-        # self.notebook.add(led_tab, text="LED Control")
+        led_tab = ttk.Frame(self.notebook)
+        self.notebook.add(led_tab, text="LED Control")
 
-        # led_frame = ttk.LabelFrame(led_tab, text="LED Control", padding=15)
-        # led_frame.pack(padx=10, pady=10, fill="both", expand=True)
+        led_frame = ttk.LabelFrame(led_tab, text="LED Control", padding=15)
+        led_frame.pack(padx=10, pady=4, fill="x", expand=False)
 
-        # self.led_on_button = ttk.Button(
-        #     led_frame, text="LED ON", command=lambda: self.send_led_command(0x01),
-        #     width=20, state="disabled"
-        # )
-        # self.led_on_button.pack(pady=5)
+        # Container for horizontal layout
+        led_buttons_frame = ttk.Frame(led_frame)
+        led_buttons_frame.pack(pady=6)
 
-        # self.led_off_button = ttk.Button(
-        #     led_frame, text="LED OFF", command=lambda: self.send_led_command(0x00),
-        #     width=20, state="disabled"
-        # )
-        # self.led_off_button.pack(pady=5)
+        self.led_on_button = ttk.Button(
+            led_buttons_frame, text="LED ON", command=lambda: self.send_led_command(0x01),
+            width=12, state="disabled"
+        )
+        self.led_on_button.grid(row=0, column=0, padx=10, pady=5)
+
+        self.led_off_button = ttk.Button(
+            led_buttons_frame, text="LED OFF", command=lambda: self.send_led_command(0x00),
+            width=12, state="disabled"
+        )
+        self.led_off_button.grid(row=0, column=1, padx=10, pady=5)
 
         # === Sensor Data Tab ===
         sensor_tab = ttk.Frame(self.notebook)
@@ -199,9 +235,12 @@ class SimpleBOLTController:
         sensor_frame = ttk.LabelFrame(sensor_tab, text="Sensor Control", padding=15)
         sensor_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
+        buttons_frame = ttk.Frame(sensor_frame)
+        buttons_frame.pack(pady=10)
+
         # LSM6DSO Button
-        lsm_frame = ttk.Frame(sensor_frame)
-        lsm_frame.pack(pady=8, fill="x")
+        lsm_frame = ttk.Frame(buttons_frame)
+        lsm_frame.grid(row=0, column=0, padx=15, pady=5)
         
         ttk.Label(lsm_frame, text="LSM6DSO (Accel/Gyro):", width=25, anchor="w").pack(side="left", padx=5)
         self.lsm6dso_button = ttk.Button(
@@ -216,8 +255,8 @@ class SimpleBOLTController:
         self.lsm6dso_status.pack(side="left", padx=5)
 
         # STT22H Button
-        temp_frame = ttk.Frame(sensor_frame)
-        temp_frame.pack(pady=8, fill="x")
+        temp_frame = ttk.Frame(buttons_frame)
+        temp_frame.grid(row=0, column=1, padx=15, pady=5)
         
         ttk.Label(temp_frame, text="STT22H (Temperature):", width=25, anchor="w").pack(side="left", padx=5)
         self.sttsh22h_button = ttk.Button(
@@ -232,8 +271,8 @@ class SimpleBOLTController:
         self.sttsh22h_status.pack(side="left", padx=5)
 
         # Strain Gauge Button
-        strain_frame = ttk.Frame(sensor_frame)
-        strain_frame.pack(pady=8, fill="x")
+        strain_frame = ttk.Frame(buttons_frame)
+        strain_frame.grid(row=0, column=2, padx=15, pady=5)
 
         ttk.Label(strain_frame, text="Strain Gauge:", width=25, anchor="w").pack(side="left", padx=5)
         self.strain_gauge_button = ttk.Button(
@@ -248,8 +287,8 @@ class SimpleBOLTController:
         self.strain_gauge_status.pack(side="left", padx=5)
 
         # ALL Sensors Button
-        all_frame = ttk.Frame(sensor_frame)
-        all_frame.pack(pady=8, fill="x")
+        all_frame = ttk.Frame(buttons_frame)
+        all_frame.grid(row=0, column=3, padx=15, pady=5)
         
         ttk.Label(all_frame, text="All Sensors:", width=25, anchor="w").pack(side="left", padx=5)
         self.all_sensors_button = ttk.Button(
@@ -264,7 +303,7 @@ class SimpleBOLTController:
         self.all_sensors_status.pack(side="left", padx=5)
 
         # Separator
-        ttk.Separator(sensor_frame, orient="horizontal").pack(fill="x", pady=15)
+        # ttk.Separator(sensor_frame, orient="horizontal").pack(fill="x", pady=15)
 
         # Sensor Info
         # info_text = (
@@ -279,8 +318,11 @@ class SimpleBOLTController:
         # info_label.pack(pady=5)
 
         # === Notification / Serial-like viewer (shared) ===
-        notify_frame = ttk.LabelFrame(root, text="Device Notifications / Status", padding=10)
-        notify_frame.pack(padx=5, pady=10, fill="both", expand=True)
+        # notify_frame = ttk.LabelFrame(root, text="Device Notifications / Status", padding=10)
+        # notify_frame.pack(padx=1, pady=2, fill="both", expand=True)
+
+        notify_frame = ttk.LabelFrame(self.paned_window, text="Device Notifications / Status", padding=10)
+        self.paned_window.add(notify_frame, minsize=200)
 
         btn_frame = ttk.Frame(notify_frame)
         btn_frame.pack(fill="x", pady=5)
@@ -294,7 +336,7 @@ class SimpleBOLTController:
         clear_btn.pack(side="right")
 
         self.notify_text = scrolledtext.ScrolledText(
-            notify_frame, height=120, state="disabled", font=("Consolas", 12)
+            notify_frame, height=50, state="disabled", font=("Consolas", 12)
         )
         self.notify_text.pack(fill="both", expand=True)
 
@@ -321,42 +363,19 @@ class SimpleBOLTController:
 
         asyncio.run_coroutine_threadsafe(_fetch(), self.loop)
 
-    def update_rssi(self):
-        async def _get_rssi():
-            if self.client and self.client.is_connected:
-                try:
-                    rssi = await self.client.get_rssi()
-                    self.root.after(0, lambda: self.rssi_label.config(
-                        text=f"RSSI: {rssi} dBm",
-                        foreground="black"
-                    ))
-                except Exception as e:
-                    self.log_device(f"✗ RSSI update failed: {e}")
-                    self.root.after(0, lambda: self.rssi_label.config(
-                        text="RSSI: N/A dBm",
-                        foreground="gray"
-                    ))
-            else:
-                self.root.after(0, lambda: self.rssi_label.config(
-                    text="RSSI: N/A dBm",
-                    foreground="gray"
-                ))
-        asyncio.run_coroutine_threadsafe(_get_rssi(), self.loop)
-
-    def start_rssi_updates(self):
-        if not self.rssi_task_running:
-            self.rssi_task_running = True
-            self._schedule_rssi_update()
-
-    def _schedule_rssi_update(self):
-        if self.is_connected and self.rssi_task_running:
-            self.update_rssi()
-            self.root.after(2000, self._schedule_rssi_update)  # Every 2 seconds
-        else:
-            self.rssi_task_running = False
-
-    def stop_rssi_updates(self):
-        self.rssi_task_running = False
+    def fetch_rssi(self):
+        """Send an RSSI request command to the device"""
+        async def _fetch():
+            if not self.client or not self.client.is_connected:
+                self.log_device("✗ Cannot fetch RSSI: Not connected")
+                return
+            try:
+                payload = bytes([RSSI_REQUEST_PREFIX])  # Simple 1-byte request: 0x40
+                await self.client.write_gatt_char(LED_WRITE_UUID, payload, response=False)
+                self.log_device("→ RSSI request sent (0x40)")
+            except Exception as e:
+                self.log_device(f"✗ RSSI request failed: {e}")
+        asyncio.run_coroutine_threadsafe(_fetch(), self.loop)
 
     def update_mtu(self):
         async def _get_mtu():
@@ -410,7 +429,7 @@ class SimpleBOLTController:
                 self._update_ui_disconnected("BOLT not found")
                 self.root.after(0, lambda: messagebox.showerror("Error", "BOLT device not found"))
                 return
-
+            
             self.root.after(0, lambda: self.status_label.config(
                 text=f"Connecting to {target.address[-8:]}...", foreground="blue"))
 
@@ -486,12 +505,12 @@ class SimpleBOLTController:
             self.strain_gauge_button.config(state="normal")
             self.all_sensors_button.config(state="normal")
             self.fetch_version_button.config(state="normal")
+            self.fetch_rssi_button.config(state="normal")
             self.status_label.config(text="Connected to BOLT", foreground="green")
             self.select_fw_button.config(state="normal")
             self.start_fw_button.config(
                 state="normal" if self.ota_bin_path else "disabled"
             )
-            self.start_rssi_updates()  # Start RSSI updates
             self.update_mtu()
         self.root.after(0, _update)
 
@@ -505,6 +524,7 @@ class SimpleBOLTController:
             self.sttsh22h_button.config(state="disabled")
             self.all_sensors_button.config(state="disabled")
             self.fetch_version_button.config(state="disabled")
+            self.fetch_rssi_button.config(state="disabled")
             self.status_label.config(text=f"Status: {msg}", foreground="red")
             
             # Reset sensor states
@@ -519,7 +539,6 @@ class SimpleBOLTController:
             self.select_fw_button.config(state="disabled", text="Select Firmware (.bin)")
             self.start_fw_button.config(state="disabled")
 
-            self.stop_rssi_updates()  # Stop RSSI updates
             self.rssi_label.config(text="RSSI: N/A dBm", foreground="gray")
             self.latency_label.config(text="Latency: N/A ms", foreground="gray")
             self.last_ping_start = None
@@ -679,6 +698,7 @@ class SimpleBOLTController:
                 self.log_device("✓ Reconnected to updated firmware")
                 # Fetch the new version
                 self.root.after(500, self.fetch_version)
+                self.root.after(1000, self.fetch_rssi)
             else:
                 self.log_device("⚠ Could not find device after OTA (maybe still rebooting)")
 
@@ -724,18 +744,18 @@ class SimpleBOLTController:
 
 
     # === LED Control ===
-    # async def _send_led_command(self, value: int):
-    #     if not self.client or not self.client.is_connected:
-    #         return
-    #     try:
-    #         payload = bytes([0x00, value])  # 0x00 = all devices, then ON/OFF
-    #         await self.client.write_gatt_char(LED_WRITE_UUID, payload, response=False)
-    #         self.log_device(f"→ LED {'ON' if value else 'OFF'} | Payload: {' '.join(f'{b:02X}' for b in payload)}")
-    #     except Exception as e:
-    #         self.log_device(f"✗ LED write failed: {e}")
+    async def _send_led_command(self, value: int):
+        if not self.client or not self.client.is_connected:
+            return
+        try:
+            payload = bytes([0x00, value])  # 0x00 = all devices, then ON/OFF
+            await self.client.write_gatt_char(LED_WRITE_UUID, payload, response=False)
+            self.log_device(f"→ LED {'ON' if value else 'OFF'} | Payload: {' '.join(f'{b:02X}' for b in payload)}")
+        except Exception as e:
+            self.log_device(f"✗ LED write failed: {e}")
 
-    # def send_led_command(self, value: int):
-    #     asyncio.run_coroutine_threadsafe(self._send_led_command(value), self.loop)
+    def send_led_command(self, value: int):
+        asyncio.run_coroutine_threadsafe(self._send_led_command(value), self.loop)
 
     # === Sensor Control ===
     async def _send_sensor_command(self, sensor_id: int, action: int):
@@ -961,6 +981,17 @@ class SimpleBOLTController:
                     else:
                         self.log_device(f"← Version response too short: {' '.join(f'{b:02X}' for b in data)}")
                         return
+                elif data[0] == NOTIF_RSSI_RESPONSE:
+                    if len(data) >= 2:
+                        rssi = struct.unpack('b', data[1:2])[0]  # Signed byte for RSSI (e.g., -50 dBm)
+                        self.log_device(f"← RSSI: {rssi} dBm")
+                        self.root.after(0, lambda r=rssi: self.rssi_label.config(
+                        text=f"RSSI: {r} dBm",
+                        foreground="black" if r > -70 else "orange" if r > -90 else "red"  # Optional: color based on signal strength
+                    ))
+                    else:
+                        self.log_device(f"← RSSI response too short: {' '.join(f'{b:02X}' for b in data)}")
+                    return  # Stop further processing
 
                 else:
                     text = f"← Received sensor data (unknown format): {hex_data}"

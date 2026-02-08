@@ -78,6 +78,9 @@ typedef struct {
 #define VERSION_REQUEST_PREFIX      0x30
 #define NOTIF_VERSION_RESPONSE      0x30
 
+#define RSSI_REQUEST_PREFIX      	0x40
+#define NOTIF_RSSI_RESPONSE     	0x40
+
 /* Firmware version - change these numbers as needed */
 #define FW_VERSION_MAJOR            2
 #define FW_VERSION_MINOR            0
@@ -121,6 +124,7 @@ static void P2PS_Send_Strain_Data(void);
 static void P2PS_Start_Sensor(uint8_t sensor_id);
 static void P2PS_Stop_Sensor(uint8_t sensor_id);
 static void P2PS_Send_Version_Response(void);
+static void P2PS_Send_rssi_Response(void);
 static void P2PS_Send_Sensor_Status(uint8_t sensor_id, uint8_t status);
 
 /* USER CODE END PFP */
@@ -189,6 +193,12 @@ void P2PS_STM_App_Notification(P2PS_STM_App_Notification_evt_t *pNotification)
 			APP_DBG_MSG("-- VERSION: Request received (0x30)\n\r");
 			P2PS_Send_Version_Response();
 		}
+
+		else if (pNotification->DataTransfered.Length >= 1&&
+		pNotification->DataTransfered.pPayload[0] == RSSI_REQUEST_PREFIX) {
+			APP_DBG_MSG("-- RSSI: Request received (0x40)\n\r");
+			P2PS_Send_rssi_Response();
+		}
 /* USER CODE END P2PS_STM_WRITE_EVT */
       break;
 
@@ -216,12 +226,17 @@ void P2PS_APP_Notification(P2PS_APP_ConnHandle_Not_evt_t *pNotification)
 /* USER CODE END P2PS_APP_Notification_P2P_Evt_Opcode */
   case PEER_CONN_HANDLE_EVT :
 /* USER CODE BEGIN PEER_CONN_HANDLE_EVT */
+	  P2P_Server_App_Context.ConnectionHandle = pNotification->ConnectionHandle;
+	            APP_DBG_MSG("-- Connected - Handle saved = 0x%04X\n\r",
+	                        P2P_Server_App_Context.ConnectionHandle);
 
 /* USER CODE END PEER_CONN_HANDLE_EVT */
     break;
 
     case PEER_DISCON_HANDLE_EVT :
 /* USER CODE BEGIN PEER_DISCON_HANDLE_EVT */
+    	P2P_Server_App_Context.ConnectionHandle = 0xFFFF;  // invalid / disconnected
+    	            APP_DBG_MSG("-- Disconnected - Handle cleared\n\r");
 
 /* USER CODE END PEER_DISCON_HANDLE_EVT */
     break;
@@ -448,6 +463,44 @@ static void P2PS_Send_Version_Response(void) {
 		APP_DBG_MSG("-- VERSION: Sent %d.%d.%d\n\r",
 		FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH);
 	}
+}
+
+static void P2PS_Send_rssi_Response(void)
+{
+    if (P2P_Server_App_Context.Notification_Status == 0)
+        return;
+
+    if (P2P_Server_App_Context.ConnectionHandle == 0xFFFF || P2P_Server_App_Context.ConnectionHandle == 0)
+    {
+        APP_DBG_MSG("-- RSSI: No active connection\n\r");
+        return;
+    }
+
+    tBleStatus ret;
+    uint8_t rssi_value;
+
+    // Ask BLE stack for RSSI of the last received packet on this connection
+    ret = hci_read_rssi(P2P_Server_App_Context.ConnectionHandle, &rssi_value);
+
+    if (ret != BLE_STATUS_SUCCESS)
+    {
+        APP_DBG_MSG("-- RSSI read failed (status=0x%02X)\n\r", ret);
+        rssi_value = 0xFF;   // error marker - you can also choose not to send
+    }
+    else
+    {
+        APP_DBG_MSG("-- RSSI value = %d dBm\n\r", (int8_t)rssi_value);
+    }
+
+    uint8_t payload[4];
+    payload[0] = NOTIF_RSSI_RESPONSE;   // 0x40
+    payload[1] = (uint8_t)rssi_value;   // signed value as uint8_t (two's complement)
+    payload[2] = 0x00;                  // reserved / future use
+    payload[3] = 0x00;
+
+    P2PS_STM_App_Update_Char(P2P_NOTIFY_CHAR_UUID, payload);
+
+    APP_DBG_MSG("-- RSSI RESPONSE sent (value = %d dBm)\n\r", (int8_t)rssi_value);
 }
 
 /* USER CODE END FD_LOCAL_FUNCTIONS*/
